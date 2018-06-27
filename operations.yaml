@@ -1,0 +1,78 @@
+version: '3.6'
+
+services:
+
+  portal:
+    image: traefik:1.6.3
+    command: --web --web.metrics.prometheus --docker --docker.watch --docker.swarmmode --docker.domain=swarm --accessLog
+    networks:
+      - public
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      # Map the docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Map an empty configuration (to clear defaults)
+      - /dev/null:/traefik.toml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          # Must run on a [manager] node
+          - node.role == manager
+      labels:
+        # Expose the web portal (residing on port 8080)
+        - "traefik.enable=true"
+        - "traefik.docker.network=public"
+        - "traefik.frontend.rule=Host:${HOSTNAME};PathPrefixStrip:/portal"
+        - "traefik.port=8080"
+
+  hud:
+    image: portainer/portainer:1.18.1
+    command: -H "tcp://tasks.agent:9001" --tlsskipverify
+    networks:
+      - public
+      - portainer
+    volumes:
+      # Map the docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Map the relevant data volume
+      - /data/operations/portainer/data:/data
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          # Must run on a [manager] node
+          - node.role == manager
+      labels:
+        # Expose the web gui (residing on port 9000)
+        - "traefik.enable=true"
+        - "traefik.docker.network=public"
+        - "traefik.frontend.rule=Host:${HOSTNAME};PathPrefixStrip:/hud"
+        - "traefik.port=9000"
+
+  agent:
+    image: portainer/agent:1.0.0
+    networks:
+      - portainer
+    volumes:
+    # Map the docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # REQUIRED: Should be equal to the service name prefixed by "tasks."
+      # when deployed inside an overlay network
+      AGENT_CLUSTER_ADDR: tasks.agent
+      # AGENT_PORT: 9001
+      # LOG_LEVEL: debug
+    deploy:
+      mode: global
+
+networks:
+  public:
+    external:
+      name: public
+  portainer:
+
